@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harness Pro • MAIN-001</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    .drawing { width: 210mm; height: 297mm; background: #e0f2fe; border: 2px solid #000; margin: 20px auto; position: relative; overflow: hidden; font-family: Arial, sans-serif; font-size: 9pt; }
+    .green-connector { background: #22c55e; border: 3px solid #000; }
+    .yellow-bundle { background: #fef08a; border: 3px solid #000; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+  <div class="flex h-screen">
+    <!-- Sidebar -->
+    <div class="w-72 bg-slate-900 border-r border-slate-700 p-6 flex flex-col">
+      <div class="flex items-center gap-3 mb-10">
+        <div class="w-10 h-10 bg-cyan-500 rounded-2xl flex items-center justify-center text-white text-2xl font-bold">H</div>
+        <div>
+          <div class="text-2xl font-semibold tracking-tight">Harness Pro</div>
+          <div class="text-xs text-emerald-400">v2.8 • Exact Match</div>
+        </div>
+      </div>
+      <nav class="space-y-1">
+        <a href="#" onclick="switchTab(0)" class="flex items-center gap-3 px-4 py-3 bg-slate-800 rounded-2xl text-cyan-400 font-medium"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+        <a href="#" onclick="switchTab(1)" class="flex items-center gap-3 px-4 py-3 hover:bg-slate-800 rounded-2xl"><i class="fas fa-table"></i> Pinout Table</a>
+        <a href="#" onclick="switchTab(2)" class="flex items-center gap-3 px-4 py-3 hover:bg-slate-800 rounded-2xl"><i class="fas fa-sitemap"></i> Harness Diagram</a>
+        <a href="#" onclick="switchTab(3)" class="flex items-center gap-3 px-4 py-3 hover:bg-slate-800 rounded-2xl"><i class="fas fa-file-pdf"></i> Template PDF</a>
+        <a href="#" onclick="switchTab(4)" class="flex items-center gap-3 px-4 py-3 hover:bg-slate-800 rounded-2xl"><i class="fas fa-check-circle"></i> Filled Layout</a>
+      </nav>
+      <div class="mt-auto text-xs text-slate-500">Harness_ID: <span class="font-mono text-emerald-400">MAIN-001</span></div>
+    </div>
+
+    <!-- Main -->
+    <div class="flex-1 flex flex-col">
+      <header class="h-16 border-b border-slate-700 bg-slate-900 px-8 flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <h1 class="text-2xl font-semibold">Wiring Pinout • MAIN-001</h1>
+          <span id="rowCount" class="px-3 py-1 bg-emerald-500/10 text-emerald-400 text-xs font-medium rounded-full">Ready</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <button onclick="document.getElementById('excelInput').click()" class="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 px-6 py-2 rounded-2xl text-sm font-medium">
+            <i class="fas fa-upload"></i> Load Excel Pinout
+          </button>
+          <button onclick="document.getElementById('pdfInput').click()" class="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 px-6 py-2 rounded-2xl text-sm font-medium">
+            <i class="fas fa-upload"></i> Load Template PDF
+          </button>
+          <button id="populateBtn" onclick="populateTemplate()" class="hidden flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded-2xl text-sm font-medium">
+            <i class="fas fa-magic"></i> Populate Into Template
+          </button>
+          <button onclick="window.print()" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-2xl text-sm font-medium">
+            <i class="fas fa-print"></i> Print / Save as PDF
+          </button>
+        </div>
+      </header>
+
+      <div class="flex-1 p-8 overflow-auto">
+        <input type="file" id="excelInput" accept=".xlsx,.xls" style="display:none" onchange="loadExcel(event)">
+        <input type="file" id="pdfInput" accept=".pdf" style="display:none" onchange="loadPDF(event)">
+
+        <div id="section4" class="hidden">
+          <div class="flex gap-8">
+            <div class="flex-1">
+              <div class="text-lg font-medium mb-4">Original Template</div>
+              <div id="originalPreview" class="bg-slate-900 rounded-3xl overflow-hidden h-[800px]"></div>
+            </div>
+            <div class="flex-1">
+              <div class="text-lg font-medium mb-4">Filled Layout – Exact Match to Completed Sample</div>
+              <div id="filledDrawing" class="drawing"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentData = [];
+    let templatePdfUrl = null;
+
+    function loadExcel(e) {
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        const wb = XLSX.read(ev.target.result, {type: 'array'});
+        currentData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        document.getElementById('rowCount').textContent = currentData.length + ' Connections';
+        checkPopulateReady();
+      };
+      reader.readAsArrayBuffer(e.target.files[0]);
+    }
+
+    function loadPDF(e) {
+      templatePdfUrl = URL.createObjectURL(e.target.files[0]);
+      document.getElementById('originalPreview').innerHTML = `<embed src="${templatePdfUrl}" width="100%" height="800px" type="application/pdf">`;
+      checkPopulateReady();
+    }
+
+    function checkPopulateReady() {
+      if (currentData.length > 0 && templatePdfUrl) document.getElementById('populateBtn').classList.remove('hidden');
+    }
+
+    function populateTemplate() {
+      document.getElementById('section4').classList.remove('hidden');
+      renderExactDrawing();
+    }
+
+    function getWireColor(c) {
+      const map = {WHITE: '#ffffff', RED: '#ef4444', BLACK: '#111827', BLUE: '#3b82f6', GREEN: '#22c55e', YELLOW: '#eab308', ORANGE: '#f97316'};
+      return map[c ? c.toUpperCase() : 'WHITE'] || '#ffffff';
+    }
+
+    function renderExactDrawing() {
+      const container = document.getElementById('filledDrawing');
+      let html = `
+        <div class="absolute inset-0 p-8 text-[9pt] leading-tight">
+          <!-- Header -->
+          <div class="flex justify-between items-start mb-6">
+            <div>
+              <div class="text-3xl font-bold tracking-tight">Harness Wiring Layout</div>
+              <div class="text-xl">MAIN-001 • Rev 1</div>
+            </div>
+            <div class="text-right text-sm">
+              Date: ${new Date().toLocaleDateString()}<br>
+              Page 1 of 2
+            </div>
+          </div>
+
+          <!-- Notes -->
+          <div class="mb-8 space-y-1 text-[9pt]">
+            <div>1. Internal harness assembly shall be performed in accordance with standard wiring practices.</div>
+            <div>2. Complete cable assembly shall be inspected to ensure proper pinout and continuity.</div>
+            <div>3. Label cable bundle with part number and revision.</div>
+            <div>4. Crimp contacts using proper tool and die.</div>
+            <div>5. Wire gauge and color as per pinout table.</div>
+            <div>6. Refer to Harness Guide BA Tail to IO Carrier for installation.</div>
+            <div>7. Dimensions are in mm unless otherwise specified.</div>
+            <div>8. Tolerance ±10 mm for wire lengths.</div>
+          </div>
+
+          <!-- Horizontal Bundle -->
+          <div class="relative h-32 border-2 border-black mb-12">
+            <div class="absolute top-12 left-12 right-12 h-3 bg-gray-800"></div>
+            <div class="absolute -top-3 left-12 text-xs font-bold">P2</div>
+            <div class="absolute -top-3 right-12 text-xs font-bold">P4</div>
+            <div class="absolute top-6 left-1/2 -translate-x-1/2 text-xs font-bold bg-white px-4">LABEL TABLE</div>
+            <div class="absolute top-16 left-1/2 -translate-x-1/2 border border-black w-28 h-16 flex flex-col">
+              <div class="flex-1 border-b border-black flex items-center justify-center">A</div>
+              <div class="flex-1 flex items-center justify-center">B</div>
+            </div>
+            <div class="absolute -top-8 left-1/2 -translate-x-1/2 text-xs font-bold">500 MM ± 10 MM</div>
+          </div>
+
+          <!-- Vertical Connectors (Page 2 style) -->
+          <div class="flex justify-between items-start gap-8">
+            <!-- P2 -->
+            <div class="w-12">
+              <div class="green-connector w-full h-[380px] relative">
+                <div class="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-bold">P2</div>
+                <div class="absolute bottom-[-25px] left-1/2 -translate-x-1/2 text-xs font-bold">TO TAIL (J2)</div>
+                <div class="absolute -left-8 top-8 text-xs font-bold rotate-[-90deg]">Pin Triangle Indent</div>
+                <div class="absolute -left-4 top-12 w-6 h-6 bg-red-500 rotate-45"></div>
+                ${Array.from({length: 26}, (_, i) => `<div class="absolute left-1/2 -translate-x-1/2 text-[9pt] font-bold" style="top: ${22 + i*13}px">${i+1}</div>`).join('')}
+              </div>
+              <div class="text-[8pt] mt-3 text-center">
+                Crimp Contact: GLS-210-0005<br>
+                Insert Position: Z125-901<br>
+                Strip Length: 2.5 mm<br>
+                Wire Gauge: 26
+              </div>
+            </div>
+
+            <!-- Yellow Bundle + Lines -->
+            <div class="flex-1 relative h-[380px]">
+              <div class="yellow-bundle w-10 h-[380px] mx-auto"></div>
+              ${currentData.map(row => {
+                const p2 = parseInt(row['P2_Pin'] || 0);
+                const p4 = parseInt(row['P4_Pin'] || 0);
+                if (!p2 || !p4) return '';
+                const y2 = 22 + (p2-1)*13;
+                const y4 = 22 + (p4-1)*13;
+                const color = getWireColor(row['Color']);
+                return `<svg class="absolute inset-0" width="100%" height="100%"><line x1="35%" y1="${y2}px" x2="65%" y2="${y4}px" stroke="${color}" stroke-width="2.5" /></svg>`;
+              }).join('')}
+              ${currentData.map(row => {
+                const p2 = parseInt(row['P2_Pin'] || 0);
+                const p4 = parseInt(row['P4_Pin'] || 0);
+                if (!p2 || !p4 || !row['TP']) return '';
+                const y = (22 + (p2-1)*13 + 22 + (p4-1)*13) / 2;
+                return `<div class="absolute text-[8pt] font-medium left-1/2 -translate-x-1/2 bg-white px-1" style="top: ${y}px">${row['TP']}</div>`;
+              }).join('')}
+            </div>
+
+            <!-- P4 -->
+            <div class="w-12">
+              <div class="green-connector w-full h-[380px] relative">
+                <div class="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-bold">P4</div>
+                <div class="absolute bottom-[-25px] left-1/2 -translate-x-1/2 text-xs font-bold">TO IO CARRIER (J4)</div>
+                <div class="absolute -right-8 top-8 text-xs font-bold rotate-90">Pin Triangle Indent</div>
+                <div class="absolute -right-4 top-12 w-6 h-6 bg-red-500 rotate-45"></div>
+                ${Array.from({length: 26}, (_, i) => `<div class="absolute left-1/2 -translate-x-1/2 text-[9pt] font-bold" style="top: ${22 + i*13}px">${i+1}</div>`).join('')}
+              </div>
+              <div class="text-[8pt] mt-3 text-center">
+                Crimp Contact: GLS-210-0005<br>
+                Insert Position: Z125-901<br>
+                Strip Length: 2.5 mm<br>
+                Wire Gauge: 26
+              </div>
+            </div>
+          </div>
+
+          <!-- Full Pinout Table -->
+          <div class="mt-16">
+            <div class="text-sm font-bold mb-3">Full Pinout Table</div>
+            <table class="w-full border border-black text-[9pt]">
+              <thead>
+                <tr class="bg-slate-800 text-white">
+                  <th class="border border-black px-3 py-1">P2_Pin</th>
+                  <th class="border border-black px-3 py-1">Signal Name</th>
+                  <th class="border border-black px-3 py-1">AWG</th>
+                  <th class="border border-black px-3 py-1">Color</th>
+                  <th class="border border-black px-3 py-1">TP</th>
+                  <th class="border border-black px-3 py-1">P4_Pin</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${currentData.map(row => `
+                  <tr>
+                    <td class="border border-black px-3 py-1 text-center">${row['P2_Pin'] || ''}</td>
+                    <td class="border border-black px-3 py-1">${row['Signal Name'] || ''}</td>
+                    <td class="border border-black px-3 py-1 text-center">${row['AWG'] || ''}</td>
+                    <td class="border border-black px-3 py-1">
+                      <span class="inline-block w-4 h-4 rounded-full border border-black align-middle" style="background-color: ${getWireColor(row['Color'])}"></span> ${row['Color'] || ''}
+                    </td>
+                    <td class="border border-black px-3 py-1 text-center">${row['TP'] || ''}</td>
+                    <td class="border border-black px-3 py-1 text-center">${row['P4_Pin'] || ''}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Footer -->
+          <div class="absolute bottom-8 left-8 right-8 text-xs font-bold border-t border-black pt-3">
+            HARNESS GUIDE BA TAIL TO IO CARRIER
+          </div>
+        </div>
+      `;
+      container.innerHTML = html;
+    }
+
+    function switchTab(n) {
+      document.getElementById('section4').classList.toggle('hidden', n !== 4);
+    }
+
+    switchTab(0);
+  </script>
+</body>
+</html>
