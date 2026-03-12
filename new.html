@@ -8,9 +8,66 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
-    .drawing { width: 210mm; height: 297mm; background: #e0f2fe; border: 2px solid #000; margin: 20px auto; position: relative; overflow: hidden; font-family: Arial, sans-serif; font-size: 9pt; }
-    .green-connector { background: #22c55e; border: 3px solid #000; }
-    .yellow-bundle { background: #fef08a; border: 3px solid #000; }
+    .drawing {
+      width: min(100%, 210mm);
+      max-width: 210mm;
+      aspect-ratio: 210 / 297;
+      background-color: #c8cfdd;
+      background-image:
+        repeating-linear-gradient(0deg, rgba(15, 23, 42, 0.03) 0, rgba(15, 23, 42, 0.03) 0.2mm, transparent 0.2mm, transparent 10mm),
+        repeating-linear-gradient(90deg, rgba(15, 23, 42, 0.03) 0, rgba(15, 23, 42, 0.03) 0.2mm, transparent 0.2mm, transparent 10mm);
+      border: 1.5px solid #6b7280;
+      margin: 20px auto;
+      position: relative;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      font-size: 9pt;
+      color: #111827;
+    }
+    .drawing-sheet { position: absolute; inset: 0; }
+    .ladder-connector {
+      position: absolute;
+      top: 12mm;
+      width: 12mm;
+      height: 98mm;
+      background: #37b66b;
+      border: 1px solid #111827;
+      border-radius: 2px;
+    }
+    .ladder-band {
+      position: absolute;
+      top: 11mm;
+      width: 12mm;
+      height: 100mm;
+      background: #ecee9a;
+      border: 1px solid #c7a56d;
+    }
+    .crimp-info {
+      font-size: 8pt;
+      line-height: 1.18;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .signal-tag {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      font-size: 7pt;
+      background: #ffffff;
+      border: 1px solid #6b7280;
+      padding: 0 2px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    @media print {
+      body { background: #fff !important; }
+      .drawing {
+        width: 210mm !important;
+        max-width: none;
+        height: 297mm !important;
+        margin: 0;
+        border: 1px solid #111827;
+      }
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-200 min-h-screen">
@@ -114,137 +171,293 @@
 
     function renderExactDrawing() {
       const container = document.getElementById('filledDrawing');
-      let html = `
-        <div class="absolute inset-0 p-8 text-[9pt] leading-tight">
-          <!-- Header -->
-          <div class="flex justify-between items-start mb-6">
-            <div>
-              <div class="text-3xl font-bold tracking-tight">Harness Wiring Layout</div>
-              <div class="text-xl">MAIN-001 • Rev 1</div>
-            </div>
-            <div class="text-right text-sm">
-              Date: ${new Date().toLocaleDateString()}<br>
-              Page 1 of 2
-            </div>
+
+      // Helper: keep spreadsheet text safe for HTML/SVG rendering.
+      const escapeHtml = (value) => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+      const pick = (row, keys) => {
+        for (const key of keys) {
+          if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') return row[key];
+        }
+        return '';
+      };
+      const toPin = (value) => {
+        const n = parseInt(value, 10);
+        return Number.isInteger(n) && n >= 1 && n <= 26 ? n : null;
+      };
+      const formatAwg = (value) => {
+        if (value === null || value === undefined || String(value).trim() === '') return '';
+        const s = String(value).trim();
+        return /AWG/i.test(s) ? s.toUpperCase() : `${s} AWG`;
+      };
+      const shortColor = (value) => {
+        const map = {WHITE: 'WHT', BLACK: 'BLK', BLUE: 'BLU', GREEN: 'GRN', YELLOW: 'YLW', ORANGE: 'ORG', RED: 'RED'};
+        const normalized = String(value || 'WHITE').trim().toUpperCase();
+        return map[normalized] || normalized.slice(0, 3);
+      };
+
+      // Build a complete 1..26 pin model so empty rows still render.
+      const pinRows = Array.from({length: 26}, (_, i) => ({
+        p2: i + 1,
+        p4: null,
+        signal: '',
+        awg: '',
+        color: 'WHITE',
+        tp: ''
+      }));
+      currentData.forEach((row) => {
+        const p2 = toPin(pick(row, ['P2_Pin', 'P2', 'P2 Pin', 'P2PIN']));
+        const p4 = toPin(pick(row, ['P4_Pin', 'P4', 'P4 Pin', 'P4PIN']));
+        if (!p2) return;
+        const target = pinRows[p2 - 1];
+        target.p4 = p4;
+        target.signal = String(pick(row, ['Signal Name', 'Signal_Name', 'Signal']) || '').trim();
+        target.awg = String(pick(row, ['AWG', 'Wire Gauge', 'Gauge']) || '').trim();
+        target.color = String(pick(row, ['Color', 'COLOR']) || 'WHITE').trim();
+        target.tp = String(pick(row, ['TP', 'Test Point', 'TestPoint']) || '').trim();
+      });
+
+      const rightSideByPin = new Map();
+      pinRows.forEach((row) => { if (row.p4) rightSideByPin.set(row.p4, row); });
+
+      const notes = [
+        'FABRICATION, ASSEMBLY, AND INSPECTION SHALL BE PERFORMED IN ACCORDANCE WITH INTERNAL HARNESS STANDARD MSCP012 AND SHALL COMPLY WITH IPC/WHMA-A-620, CLASS 3, AND IPC-A-610, LATEST REVISION.',
+        'CONTINUITY TESTING SHALL BE PERFORMED IN ACCORDANCE WITH IPC/WHMA-A-620 SECTION 19.5, CLASS 3. HIGH POT TESTING SHALL BE PERFORMED ON THE COMPLETED CABLE ASSEMBLY.',
+        'DIMENSIONS ARE IN MILLIMETERS UNLESS OTHERWISE SPECIFIED.',
+        'COVER HARNESS BUNDLE WITH EXPANDABLE SLEEVING, ITEM #07, AND SECURE SLEEVE TO BUNDLE WITH FLEECE TESA TAPE, ITEM #06. LEAVE APPROXIMATELY 5-15 MM OF EXPOSED WIRE FROM CONNECTOR ENDS.',
+        'FLAG LABELS, ITEM #08, SHALL BE APPLIED IN ACCORDANCE WITH IPC/WHMA-A-620 SECTION 12.7.1 WITHIN 25-76 MM OF THE CONNECTOR HOUSING. REFER TO THE LABEL TABLE FOR LABEL INFORMATION.',
+        'REFERENCE INSTRUCTION DOCUMENTS IS-37 AND IS-38 FOR HARWIN GECKO CONNECTORS, ITEM #01.',
+        'POTTING MATERIAL SHALL BE LOCTITE STYCAST 2651MM, ITEM #03. EPOXY INGRESS INTO MATING INTERFACES, CONTACTS, OR LATCH FEATURES SHALL BE PREVENTED.',
+        'REFER TO "EBOM_10000440-501_A_GB4_TAIL_TO_IOCARRIER" FOR BILL OF MATERIALS.',
+        'REFER TO "WIRELIST_10000440-501_A_GB4_TAIL_TO_IOCARRIER" FOR WIRING LIST.'
+      ];
+
+      const notesHtml = notes.map((text, idx) => {
+        const number = String(idx + 1).padStart(2, '0');
+        const warning = idx === 4
+          ? '<svg width="10" height="9" viewBox="0 0 10 9" style="margin-right:2px"><path d="M5 0.5 L9.5 8.5 H0.5 Z" fill="none" stroke="#2563eb" stroke-width="1"></path><text x="5" y="7" text-anchor="middle" font-size="5" fill="#2563eb">!</text></svg>'
+          : '';
+        return `<div style="display:flex; gap:2mm; margin-bottom:1.1mm;">
+          <span style="font-weight:700; min-width:6mm;">${number}</span>
+          <span style="display:flex; align-items:flex-start;">${warning}<span>${escapeHtml(text)}</span></span>
+        </div>`;
+      }).join('');
+
+      const rowTop = 165;
+      const rowPitch = 33;
+      const yForPin = (pin) => rowTop + ((pin - 1) * rowPitch);
+
+      // Ladder grid and row text columns.
+      const ladderRowsSvg = Array.from({length: 26}, (_, i) => {
+        const pin = i + 1;
+        const y = yForPin(pin);
+        const left = pinRows[i];
+        const right = rightSideByPin.get(pin) || {};
+        return `
+          <line x1="570" y1="${y}" x2="1130" y2="${y}" stroke="#6b7280" stroke-width="1.3"/>
+          <text x="548" y="${y + 7}" text-anchor="end" font-size="21" font-weight="700" fill="#1e3a8a">${escapeHtml(left.signal || '')}</text>
+          <text x="678" y="${y + 7}" text-anchor="middle" font-size="19" fill="#374151">${escapeHtml(formatAwg(left.awg))}</text>
+          <text x="760" y="${y + 7}" text-anchor="middle" font-size="19" fill="#374151">${pin}</text>
+          <text x="838" y="${y + 7}" text-anchor="middle" font-size="19" fill="#374151">${escapeHtml(shortColor(left.color))}</text>
+          <text x="915" y="${y + 7}" text-anchor="middle" font-size="19" fill="#374151">${escapeHtml(left.tp || '')}</text>
+          <text x="982" y="${y + 7}" text-anchor="middle" font-size="19" fill="#374151">${left.p4 || ''}</text>
+          <text x="1152" y="${y + 7}" text-anchor="start" font-size="21" font-weight="700" fill="#1e3a8a">${escapeHtml(right.signal || '')}</text>
+          <text x="445" y="${y + 7}" text-anchor="end" font-size="28" font-weight="700" fill="#1e3a8a">${pin}</text>
+          <text x="1263" y="${y + 7}" text-anchor="start" font-size="28" font-weight="700" fill="#1e3a8a">${pin}</text>
+        `;
+      }).join('');
+
+      // Dynamic wire routing from loaded pin map.
+      const wireRows = pinRows.filter((row) => row.p4);
+      const wirePathsSvg = wireRows.map((row) => {
+        const y1 = yForPin(row.p2);
+        const y2 = yForPin(row.p4);
+        const skew = Math.max(-95, Math.min(95, (row.p4 - row.p2) * 7));
+        return `<path d="M570 ${y1} C ${770 + skew} ${y1} ${930 - skew} ${y2} 1130 ${y2}" stroke="${getWireColor(row.color)}" stroke-width="4" fill="none" stroke-linecap="round"/>`;
+      }).join('');
+
+      const signalTags = wireRows.map((row) => {
+        const label = row.signal || row.tp;
+        if (!label) return '';
+        const yMidMm = ((yForPin(row.p2) + yForPin(row.p4)) / 2) / 10;
+        return `<div class="signal-tag" style="left:85mm; top:${yMidMm.toFixed(2)}mm">${escapeHtml(label)}</div>`;
+      }).join('');
+
+      const dateStamp = new Date().toLocaleDateString('en-US');
+
+      const html = `
+        <div class="drawing-sheet">
+          <!-- SECTION: Engineering border + zone references -->
+          <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 2100 2970" preserveAspectRatio="none">
+            <rect x="24" y="24" width="2052" height="2922" fill="none" stroke="#7c8697" stroke-width="2"/>
+            <rect x="52" y="52" width="1996" height="2866" fill="none" stroke="#7c8697" stroke-width="2"/>
+            <line x1="52" y1="160" x2="2048" y2="160" stroke="#7c8697" stroke-width="1.5"/>
+            <line x1="52" y1="750" x2="2048" y2="750" stroke="#7c8697" stroke-width="1.5"/>
+            <line x1="52" y1="1500" x2="2048" y2="1500" stroke="#7c8697" stroke-width="1.5"/>
+            <line x1="52" y1="2200" x2="2048" y2="2200" stroke="#7c8697" stroke-width="1.5"/>
+            <text x="150" y="48" font-size="18" fill="#475569">1</text><text x="450" y="48" font-size="18" fill="#475569">2</text><text x="850" y="48" font-size="18" fill="#475569">3</text><text x="1240" y="48" font-size="18" fill="#475569">4</text><text x="1630" y="48" font-size="18" fill="#475569">5</text><text x="1940" y="48" font-size="18" fill="#475569">6</text>
+            <text x="150" y="2940" font-size="18" fill="#475569">1</text><text x="450" y="2940" font-size="18" fill="#475569">2</text><text x="850" y="2940" font-size="18" fill="#475569">3</text><text x="1240" y="2940" font-size="18" fill="#475569">4</text><text x="1630" y="2940" font-size="18" fill="#475569">5</text><text x="1940" y="2940" font-size="18" fill="#475569">6</text>
+            <text x="32" y="420" font-size="18" fill="#475569">A</text><text x="32" y="1120" font-size="18" fill="#475569">B</text><text x="32" y="1850" font-size="18" fill="#475569">C</text><text x="32" y="2550" font-size="18" fill="#475569">D</text>
+            <text x="2062" y="420" font-size="18" fill="#475569">A</text><text x="2062" y="1120" font-size="18" fill="#475569">B</text><text x="2062" y="1850" font-size="18" fill="#475569">C</text><text x="2062" y="2550" font-size="18" fill="#475569">D</text>
+          </svg>
+
+          <!-- SECTION: Top title + revision -->
+          <div style="position:absolute; top:6mm; left:105mm; transform:translateX(-50%); text-align:center; line-height:1.15;">
+            <div style="font-size:10.5pt; font-weight:700; letter-spacing:0.02em;">HARNESS, GLIDE B4, TAIL TO I/O CARRIER</div>
+            <div style="font-size:9pt;">Part Number: 10000440-501 &nbsp;|&nbsp; Rev: A &nbsp;|&nbsp; Sheet 1 of 2 &nbsp;|&nbsp; Date: ${dateStamp}</div>
           </div>
-
-          <!-- Notes -->
-          <div class="mb-8 space-y-1 text-[9pt]">
-            <div>1. Internal harness assembly shall be performed in accordance with standard wiring practices.</div>
-            <div>2. Complete cable assembly shall be inspected to ensure proper pinout and continuity.</div>
-            <div>3. Label cable bundle with part number and revision.</div>
-            <div>4. Crimp contacts using proper tool and die.</div>
-            <div>5. Wire gauge and color as per pinout table.</div>
-            <div>6. Refer to Harness Guide BA Tail to IO Carrier for installation.</div>
-            <div>7. Dimensions are in mm unless otherwise specified.</div>
-            <div>8. Tolerance ±10 mm for wire lengths.</div>
-          </div>
-
-          <!-- Horizontal Bundle -->
-          <div class="relative h-32 border-2 border-black mb-12">
-            <div class="absolute top-12 left-12 right-12 h-3 bg-gray-800"></div>
-            <div class="absolute -top-3 left-12 text-xs font-bold">P2</div>
-            <div class="absolute -top-3 right-12 text-xs font-bold">P4</div>
-            <div class="absolute top-6 left-1/2 -translate-x-1/2 text-xs font-bold bg-white px-4">LABEL TABLE</div>
-            <div class="absolute top-16 left-1/2 -translate-x-1/2 border border-black w-28 h-16 flex flex-col">
-              <div class="flex-1 border-b border-black flex items-center justify-center">A</div>
-              <div class="flex-1 flex items-center justify-center">B</div>
-            </div>
-            <div class="absolute -top-8 left-1/2 -translate-x-1/2 text-xs font-bold">500 MM ± 10 MM</div>
-          </div>
-
-          <!-- Vertical Connectors (Page 2 style) -->
-          <div class="flex justify-between items-start gap-8">
-            <!-- P2 -->
-            <div class="w-12">
-              <div class="green-connector w-full h-[380px] relative">
-                <div class="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-bold">P2</div>
-                <div class="absolute bottom-[-25px] left-1/2 -translate-x-1/2 text-xs font-bold">TO TAIL (J2)</div>
-                <div class="absolute -left-8 top-8 text-xs font-bold rotate-[-90deg]">Pin Triangle Indent</div>
-                <div class="absolute -left-4 top-12 w-6 h-6 bg-red-500 rotate-45"></div>
-                ${Array.from({length: 26}, (_, i) => `<div class="absolute left-1/2 -translate-x-1/2 text-[9pt] font-bold" style="top: ${22 + i*13}px">${i+1}</div>`).join('')}
-              </div>
-              <div class="text-[8pt] mt-3 text-center">
-                Crimp Contact: GLS-210-0005<br>
-                Insert Position: Z125-901<br>
-                Strip Length: 2.5 mm<br>
-                Wire Gauge: 26
-              </div>
-            </div>
-
-            <!-- Yellow Bundle + Lines -->
-            <div class="flex-1 relative h-[380px]">
-              <div class="yellow-bundle w-10 h-[380px] mx-auto"></div>
-              ${currentData.map(row => {
-                const p2 = parseInt(row['P2_Pin'] || 0);
-                const p4 = parseInt(row['P4_Pin'] || 0);
-                if (!p2 || !p4) return '';
-                const y2 = 22 + (p2-1)*13;
-                const y4 = 22 + (p4-1)*13;
-                const color = getWireColor(row['Color']);
-                return `<svg class="absolute inset-0" width="100%" height="100%"><line x1="35%" y1="${y2}px" x2="65%" y2="${y4}px" stroke="${color}" stroke-width="2.5" /></svg>`;
-              }).join('')}
-              ${currentData.map(row => {
-                const p2 = parseInt(row['P2_Pin'] || 0);
-                const p4 = parseInt(row['P4_Pin'] || 0);
-                if (!p2 || !p4 || !row['TP']) return '';
-                const y = (22 + (p2-1)*13 + 22 + (p4-1)*13) / 2;
-                return `<div class="absolute text-[8pt] font-medium left-1/2 -translate-x-1/2 bg-white px-1" style="top: ${y}px">${row['TP']}</div>`;
-              }).join('')}
-            </div>
-
-            <!-- P4 -->
-            <div class="w-12">
-              <div class="green-connector w-full h-[380px] relative">
-                <div class="absolute -top-5 left-1/2 -translate-x-1/2 text-xs font-bold">P4</div>
-                <div class="absolute bottom-[-25px] left-1/2 -translate-x-1/2 text-xs font-bold">TO IO CARRIER (J4)</div>
-                <div class="absolute -right-8 top-8 text-xs font-bold rotate-90">Pin Triangle Indent</div>
-                <div class="absolute -right-4 top-12 w-6 h-6 bg-red-500 rotate-45"></div>
-                ${Array.from({length: 26}, (_, i) => `<div class="absolute left-1/2 -translate-x-1/2 text-[9pt] font-bold" style="top: ${22 + i*13}px">${i+1}</div>`).join('')}
-              </div>
-              <div class="text-[8pt] mt-3 text-center">
-                Crimp Contact: GLS-210-0005<br>
-                Insert Position: Z125-901<br>
-                Strip Length: 2.5 mm<br>
-                Wire Gauge: 26
-              </div>
-            </div>
-          </div>
-
-          <!-- Full Pinout Table -->
-          <div class="mt-16">
-            <div class="text-sm font-bold mb-3">Full Pinout Table</div>
-            <table class="w-full border border-black text-[9pt]">
-              <thead>
-                <tr class="bg-slate-800 text-white">
-                  <th class="border border-black px-3 py-1">P2_Pin</th>
-                  <th class="border border-black px-3 py-1">Signal Name</th>
-                  <th class="border border-black px-3 py-1">AWG</th>
-                  <th class="border border-black px-3 py-1">Color</th>
-                  <th class="border border-black px-3 py-1">TP</th>
-                  <th class="border border-black px-3 py-1">P4_Pin</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${currentData.map(row => `
-                  <tr>
-                    <td class="border border-black px-3 py-1 text-center">${row['P2_Pin'] || ''}</td>
-                    <td class="border border-black px-3 py-1">${row['Signal Name'] || ''}</td>
-                    <td class="border border-black px-3 py-1 text-center">${row['AWG'] || ''}</td>
-                    <td class="border border-black px-3 py-1">
-                      <span class="inline-block w-4 h-4 rounded-full border border-black align-middle" style="background-color: ${getWireColor(row['Color'])}"></span> ${row['Color'] || ''}
-                    </td>
-                    <td class="border border-black px-3 py-1 text-center">${row['TP'] || ''}</td>
-                    <td class="border border-black px-3 py-1 text-center">${row['P4_Pin'] || ''}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
+          <div style="position:absolute; top:4mm; right:8mm; width:45mm;">
+            <table style="width:100%; border-collapse:collapse; font-size:7pt;">
+              <tr><th style="border:1px solid #6b7280; width:8mm;">REVISION</th><th style="border:1px solid #6b7280;">DESCRIPTION</th><th style="border:1px solid #6b7280; width:11mm;">DATE</th><th style="border:1px solid #6b7280; width:8mm;">BY</th></tr>
+              <tr><td style="border:1px solid #6b7280; text-align:center;">A01</td><td style="border:1px solid #6b7280;">INITIAL RELEASE</td><td style="border:1px solid #6b7280; text-align:center;">16-FEB-26</td><td style="border:1px solid #6b7280; text-align:center;">KATIE C.</td></tr>
             </table>
           </div>
 
-          <!-- Footer -->
-          <div class="absolute bottom-8 left-8 right-8 text-xs font-bold border-t border-black pt-3">
-            HARNESS GUIDE BA TAIL TO IO CARRIER
+          <!-- SECTION 1: Notes -->
+          <div style="position:absolute; left:12mm; top:16mm; width:73mm; font-size:8pt; line-height:1.2;">
+            <div style="color:#1d4ed8; font-weight:700; margin-bottom:1.4mm;">NOTES</div>
+            ${notesHtml}
+          </div>
+
+          <!-- SECTION 2 + 3: Main harness overview and label table -->
+          <div style="position:absolute; left:80mm; top:78mm; width:98mm; height:34mm;">
+            <svg viewBox="0 0 980 340" class="w-full h-full">
+              <defs>
+                <marker id="dimArrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#1f2937"></path>
+                </marker>
+              </defs>
+              <line x1="90" y1="35" x2="890" y2="35" stroke="#1f2937" stroke-width="1.5" marker-start="url(#dimArrow)" marker-end="url(#dimArrow)"></line>
+              <line x1="90" y1="20" x2="90" y2="100" stroke="#6b7280" stroke-width="1"></line>
+              <line x1="890" y1="20" x2="890" y2="100" stroke="#6b7280" stroke-width="1"></line>
+              <text x="490" y="28" text-anchor="middle" font-size="20" font-weight="700" fill="#374151">590 MM + 10 MM</text>
+              <rect x="55" y="125" width="34" height="112" fill="#39b86f" stroke="#111827" stroke-width="1.5"></rect>
+              <rect x="892" y="125" width="34" height="112" fill="#39b86f" stroke="#111827" stroke-width="1.5"></rect>
+              <rect x="90" y="166" width="800" height="31" fill="#8a9099" stroke="#4b5563" stroke-width="1.4"></rect>
+              <rect x="90" y="173" width="800" height="16" fill="#6b7280"></rect>
+              <rect x="438" y="127" width="24" height="82" fill="#f8fafc" stroke="#4b5563" stroke-width="1"></rect>
+              <rect x="520" y="127" width="24" height="82" fill="#f8fafc" stroke="#4b5563" stroke-width="1"></rect>
+              <ellipse cx="115" cy="95" rx="36" ry="18" fill="#efe3bd" stroke="#b58e59" stroke-width="1.2"></ellipse>
+              <ellipse cx="865" cy="95" rx="36" ry="18" fill="#efe3bd" stroke="#b58e59" stroke-width="1.2"></ellipse>
+              <ellipse cx="490" cy="130" rx="40" ry="16" fill="#efe3bd" stroke="#b58e59" stroke-width="1.2"></ellipse>
+              <text x="55" y="258" text-anchor="middle" font-size="36" font-weight="700" fill="#1f2937">P2</text>
+              <text x="945" y="258" text-anchor="middle" font-size="36" font-weight="700" fill="#1f2937">P4</text>
+              <text x="115" y="99" text-anchor="middle" font-size="14" fill="#374151">01, 02, 03</text>
+              <text x="865" y="99" text-anchor="middle" font-size="14" fill="#374151">01, 02, 03</text>
+              <text x="490" y="134" text-anchor="middle" font-size="14" fill="#374151">04, 05, 07</text>
+            </svg>
+          </div>
+          <div style="position:absolute; left:102mm; top:112mm; width:48mm; border:1px solid #7c8697; padding:2.5mm; text-align:center;">
+            <div style="font-size:9pt; font-weight:700; text-decoration:underline; margin-bottom:2mm;">LABEL TABLE</div>
+            <div style="display:grid; grid-template-columns:7mm 1fr; gap:0; border:1px solid #9ca3af; margin-bottom:2mm; background:#f3f4f6;">
+              <div style="font-weight:700; border-right:1px solid #9ca3af; padding:1.2mm 0;">A.</div>
+              <div style="padding:1.2mm 0;">P2 (TO TAIL J2)<br>GLI-B4-A01<br>10000440-501</div>
+            </div>
+            <div style="display:grid; grid-template-columns:7mm 1fr; gap:0; border:1px solid #9ca3af; background:#f3f4f6;">
+              <div style="font-weight:700; border-right:1px solid #9ca3af; padding:1.2mm 0;">B.</div>
+              <div style="padding:1.2mm 0;">P4 (TO I/O J4)<br>GLI-B4-A01<br>10000440-501</div>
+            </div>
+          </div>
+
+          <!-- SECTION 4: Detailed ladder wiring diagram -->
+          <div style="position:absolute; left:20mm; top:130mm; width:170mm; height:118mm;">
+            <div style="position:absolute; left:43mm; top:2mm; font-size:15pt; font-weight:700; color:#1e3a8a;">P2</div>
+            <div style="position:absolute; left:42mm; top:9mm; font-size:9pt; font-weight:700; color:#1e3a8a;">TO TAIL (J2)</div>
+            <div style="position:absolute; left:118mm; top:2mm; font-size:15pt; font-weight:700; color:#1e3a8a;">P4</div>
+            <div style="position:absolute; left:118mm; top:9mm; font-size:9pt; font-weight:700; color:#1e3a8a;">TO I/O CARRIER (J4)</div>
+
+            <div class="ladder-connector" style="left:16mm;"></div>
+            <div class="ladder-band" style="left:45mm;"></div>
+            <div style="position:absolute; left:58mm; top:11mm; width:54mm; height:100mm; background:#f3f4b1; border-top:1px solid #c7a56d; border-bottom:1px solid #c7a56d;"></div>
+            <div class="ladder-band" style="left:112mm;"></div>
+            <div class="ladder-connector" style="left:141mm;"></div>
+
+            <svg style="position:absolute; inset:0; width:100%; height:100%;" viewBox="0 0 1700 1180" preserveAspectRatio="none">
+              <!-- Pin triangle indicators -->
+              <text x="18" y="284" fill="#dc2626" font-size="20" font-weight="700">PIN1 TRIANGLE INDENT</text>
+              <line x1="106" y1="300" x2="176" y2="378" stroke="#dc2626" stroke-width="4"></line>
+              <polygon points="176,378 164,356 186,364" fill="#dc2626"></polygon>
+              <text x="1328" y="284" fill="#dc2626" font-size="20" font-weight="700">PIN1 TRIANGLE INDENT</text>
+              <line x1="1440" y1="300" x2="1390" y2="378" stroke="#dc2626" stroke-width="4"></line>
+              <polygon points="1390,378 1382,356 1404,364" fill="#dc2626"></polygon>
+
+              <!-- Connector insert sketches -->
+              <rect x="90" y="332" width="260" height="172" fill="#eef2f7" stroke="#9ca3af"></rect>
+              <polygon points="158,372 300,388 310,468 168,452" fill="#2ea95f" stroke="#1f2937" stroke-width="2"></polygon>
+              <text x="178" y="412" font-size="42" font-weight="700">1</text><text x="313" y="412" font-size="42" font-weight="700">13</text><text x="178" y="472" font-size="42" font-weight="700">14</text><text x="313" y="472" font-size="42" font-weight="700">26</text>
+              <text x="174" y="550" font-size="30" font-weight="700">INSERT (REAR) VIEW</text>
+
+              <rect x="1348" y="332" width="260" height="172" fill="#eef2f7" stroke="#9ca3af"></rect>
+              <polygon points="1418,372 1560,388 1570,468 1428,452" fill="#2ea95f" stroke="#1f2937" stroke-width="2"></polygon>
+              <text x="1438" y="412" font-size="42" font-weight="700">1</text><text x="1573" y="412" font-size="42" font-weight="700">13</text><text x="1438" y="472" font-size="42" font-weight="700">14</text><text x="1573" y="472" font-size="42" font-weight="700">26</text>
+              <text x="1438" y="550" font-size="30" font-weight="700">INSERT (REAR) VIEW</text>
+
+              <!-- Ladder row framework -->
+              ${ladderRowsSvg}
+              ${wirePathsSvg}
+            </svg>
+            ${signalTags}
+          </div>
+
+          <!-- Connector crimp data -->
+          <div class="crimp-info" style="position:absolute; left:27mm; top:213mm;">
+            CRIMP CONTACT:&nbsp;&nbsp;&nbsp;&nbsp;G125-1010005<br>
+            CRIMPER:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Z125-900<br>
+            POSITIONER:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Z125-901<br>
+            INSERT/REMOVER:&nbsp;&nbsp;Z125-902<br>
+            STRIP LENGTH:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.0MM<br>
+            WIRE GAUGE:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;26
+          </div>
+          <div class="crimp-info" style="position:absolute; right:27mm; top:213mm;">
+            CRIMP CONTACT:&nbsp;&nbsp;&nbsp;&nbsp;G125-1010005<br>
+            CRIMPER:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Z125-900<br>
+            POSITIONER:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Z125-901<br>
+            INSERT/REMOVER:&nbsp;&nbsp;Z125-902<br>
+            STRIP LENGTH:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2.0MM<br>
+            WIRE GAUGE:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;26
+          </div>
+
+          <!-- SECTION 5: Approval/title block -->
+          <div style="position:absolute; right:8mm; bottom:8mm; width:58mm; border:1px solid #6b7280; background:#dbe1ec; font-size:7pt;">
+            <table style="width:100%; border-collapse:collapse;">
+              <tr>
+                <td style="border:1px solid #6b7280; width:17mm;">APPROVALS</td>
+                <td style="border:1px solid #6b7280; width:10mm;">DATE</td>
+                <td style="border:1px solid #6b7280;" colspan="4">Title</td>
+              </tr>
+              <tr><td style="border:1px solid #6b7280;">EE</td><td style="border:1px solid #6b7280;">&nbsp;</td><td style="border:1px solid #6b7280; font-weight:700;" colspan="4" rowspan="3">HARNESS, GLIDE B4, TAIL TO I/O CARRIER</td></tr>
+              <tr><td style="border:1px solid #6b7280;">ME</td><td style="border:1px solid #6b7280;">&nbsp;</td></tr>
+              <tr><td style="border:1px solid #6b7280;">TECH</td><td style="border:1px solid #6b7280;">&nbsp;</td></tr>
+              <tr>
+                <td style="border:1px solid #6b7280;">REFERENCE DOCUMENTS</td>
+                <td style="border:1px solid #6b7280;">&nbsp;</td>
+                <td style="border:1px solid #6b7280; width:8mm;">Size</td>
+                <td style="border:1px solid #6b7280; width:15mm;">Number</td>
+                <td style="border:1px solid #6b7280; width:8mm;">Revision</td>
+                <td style="border:1px solid #6b7280; width:10mm;">Sheet</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #6b7280;">PCB: M-10025699 REV A</td>
+                <td style="border:1px solid #6b7280;">&nbsp;</td>
+                <td style="border:1px solid #6b7280; text-align:center;">B</td>
+                <td style="border:1px solid #6b7280; text-align:center;">10000440-501</td>
+                <td style="border:1px solid #6b7280; text-align:center;">A</td>
+                <td style="border:1px solid #6b7280; text-align:center;">1 of 2</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #6b7280;">OTHER: NA</td>
+                <td style="border:1px solid #6b7280;">&nbsp;</td>
+                <td style="border:1px solid #6b7280;">Date</td>
+                <td style="border:1px solid #6b7280; text-align:center;">${dateStamp}</td>
+                <td style="border:1px solid #6b7280;">File</td>
+                <td style="border:1px solid #6b7280;">G:\\Shared drives\\HARNESS_10000440\\GB4_TAIL_TO_IOCARRIER\\DWG</td>
+              </tr>
+            </table>
           </div>
         </div>
       `;
