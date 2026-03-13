@@ -1,0 +1,15 @@
+export type GlideB4DrawingUri =
+  | "drawing://project/current"
+  | "drawing://project/{projectId}"
+  | "drawing://project/{projectId}/sheet/{sheetId}"
+  | "drawing://libraries/connectors"
+  | "drawing://libraries/title-blocks"
+  | "drawing://libraries/symbols"
+  | "drawing://libraries/callouts"
+  | "drawing://libraries/wire-specs"
+  | "drawing://templates/sheets/assembly"
+  | "drawing://templates/sheets/pinout"
+  | "drawing://templates/notes/default"
+  | "drawing://standards/layer-policy"
+  | "drawing://standards/dimension-style"
+  | "drawing://standards/text-style";
